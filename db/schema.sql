@@ -176,6 +176,9 @@ CREATE TABLE IF NOT EXISTS comment_sync_states (
   -- continuation must reuse the same query), candidateCursor = value to commit on completion.
   continuation          jsonb,
   last_synced_at        timestamptz,
+  -- Last time a complete walk over the whole backlog finished. Incremental runs only see new
+  -- comments, so a periodic full walk refreshes metrics and edits of older ones.
+  last_full_sync_at     timestamptz,
   next_sync_at          timestamptz,
   -- Lease. A crashed worker's lock expires instead of blocking forever; the token fences
   -- finish/fail so a worker whose lease expired cannot overwrite a newer run's state.

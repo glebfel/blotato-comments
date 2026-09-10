@@ -283,5 +283,12 @@ describeDb('Postgres repositories', () => {
     expect(await repos.syncStates.claimDue(due, 10, 60_000)).toEqual([]); // already claimed
     expect(await repos.syncStates.renew(ids.publication, claimed[0]!.lockToken, due, 60_000)).toBe(true);
     expect(await sync.syncPublication(ids.publication, { lease: claimed[0] })).toMatchObject({ status: 'ok' });
+
+    // scheduleNoLaterThan only ever moves the run earlier.
+    const soon = new Date(clock.now().getTime() + 1_000);
+    await repos.syncStates.scheduleNoLaterThan(ids.publication, soon);
+    expect((await repos.syncStates.get(ids.publication))?.nextSyncAt).toEqual(soon);
+    await repos.syncStates.scheduleNoLaterThan(ids.publication, new Date(soon.getTime() + 60_000));
+    expect((await repos.syncStates.get(ids.publication))?.nextSyncAt).toEqual(soon);
   });
 });

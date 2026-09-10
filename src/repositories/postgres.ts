@@ -552,7 +552,7 @@ function escapeLike(value: string): string {
 }
 
 const SYNC_STATE_COLUMNS =
-  'publication_id, status, cursor, continuation, last_synced_at, next_sync_at, lock_token, lock_expires_at, consecutive_failures, last_error';
+  'publication_id, status, cursor, continuation, last_synced_at, last_full_sync_at, next_sync_at, lock_token, lock_expires_at, consecutive_failures, last_error';
 
 interface SyncStateRow {
   publication_id: string;
@@ -560,6 +560,7 @@ interface SyncStateRow {
   cursor: string | null;
   continuation: SyncContinuation | null;
   last_synced_at: Date | null;
+  last_full_sync_at: Date | null;
   next_sync_at: Date | null;
   lock_token: string | null;
   lock_expires_at: Date | null;
@@ -574,6 +575,7 @@ function toSyncState(r: SyncStateRow): CommentSyncState {
     cursor: r.cursor,
     continuation: r.continuation,
     lastSyncedAt: r.last_synced_at,
+    lastFullSyncAt: r.last_full_sync_at,
     nextSyncAt: r.next_sync_at,
     lockToken: r.lock_token,
     lockExpiresAt: r.lock_expires_at,
@@ -610,6 +612,15 @@ export class PgSyncStateRepository implements SyncStateRepository {
     );
   }
 
+  async scheduleNoLaterThan(publicationId: string, at: Date): Promise<void> {
+    await this.db.query(
+      `INSERT INTO comment_sync_states (publication_id, next_sync_at) VALUES ($1, $2)
+       ON CONFLICT (publication_id) DO UPDATE
+         SET next_sync_at = LEAST(comment_sync_states.next_sync_at, EXCLUDED.next_sync_at), updated_at = now()`,
+      [publicationId, at],
+    );
+  }
+
   async tryAcquire(publicationId: string, now: Date, leaseMs: number): Promise<SyncLease | null> {
     const lockToken = randomUUID();
     // Single statement, so two workers racing for the same publication cannot both win.
@@ -642,6 +653,7 @@ export class PgSyncStateRepository implements SyncStateRepository {
     const { rowCount } = await this.db.query(
       `UPDATE comment_sync_states
        SET status = 'idle', cursor = $3, continuation = $4, last_synced_at = $5, next_sync_at = $6,
+           last_full_sync_at = COALESCE($7, last_full_sync_at),
            lock_token = NULL, lock_expires_at = NULL, consecutive_failures = 0, last_error = NULL, updated_at = $5
        WHERE publication_id = $1 AND lock_token = $2`,
       [
@@ -651,6 +663,7 @@ export class PgSyncStateRepository implements SyncStateRepository {
         patch.continuation ? JSON.stringify(patch.continuation) : null,
         patch.lastSyncedAt,
         patch.nextSyncAt,
+        patch.lastFullSyncAt ?? null,
       ],
     );
     return (rowCount ?? 0) > 0;

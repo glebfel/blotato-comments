@@ -212,6 +212,24 @@ describe('CommentSyncService', () => {
     expect((await h.repos.syncStates.get(IDS.twitterPublication))?.lastError).toBe('internal error');
   });
 
+  it('runs a full walk once a day so edits and metrics of old comments are refreshed', async () => {
+    const h = createHarness({ fullResyncIntervalMs: 24 * 3_600_000 });
+    const old = h.twitter.seed(IDS.tweet, { body: 'original', metrics: { likes: 1 } });
+    expect(await h.sync.syncPublication(IDS.twitterPublication)).toMatchObject({ fetched: 1 }); // first run walks everything
+    expect((await h.repos.syncStates.get(IDS.twitterPublication))?.lastFullSyncAt).toEqual(h.clock.now());
+
+    h.twitter.patch(IDS.tweet, old, { body: 'edited', metrics: { likes: 9 } });
+    h.clock.advance(3_600_000);
+    expect(await h.sync.syncPublication(IDS.twitterPublication)).toMatchObject({ fetched: 0 }); // incremental: unseen
+    expect((await h.repos.comments.findByExternalId(IDS.twitterPublication, old))?.body).toBe('original');
+
+    h.clock.advance(24 * 3_600_000);
+    expect(await h.sync.syncPublication(IDS.twitterPublication)).toMatchObject({ fetched: 1, updated: 1 }); // full walk due
+    const row = (await h.repos.comments.findByExternalId(IDS.twitterPublication, old))!;
+    expect(row).toMatchObject({ body: 'edited', metrics: { likes: 9 } });
+    expect((await h.repos.syncStates.get(IDS.twitterPublication))?.lastFullSyncAt).toEqual(h.clock.now());
+  });
+
   it('rejects publications on platforms without an adapter', async () => {
     const h = createHarness({ withUnsupportedPlatform: true });
     await expect(h.sync.syncPublication(IDS.instagramPublication)).rejects.toMatchObject({

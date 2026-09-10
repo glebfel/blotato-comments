@@ -22,6 +22,11 @@ export interface SyncOptions {
   pausedRetryMs: number;
   /** Max read-triggered background syncs running at once in this process; extra ones are left to the poller. */
   backgroundConcurrency: number;
+  /**
+   * How often a full walk replaces the incremental one, so likes and edits of older comments
+   * get refreshed. Stretched for old posts (at least four poll intervals).
+   */
+  fullResyncIntervalMs: number;
 }
 
 export const DEFAULT_SYNC_OPTIONS: SyncOptions = {
@@ -32,6 +37,7 @@ export const DEFAULT_SYNC_OPTIONS: SyncOptions = {
   giveUpAfterMs: 10 * 60_000,
   pausedRetryMs: 24 * 60 * 60_000,
   backgroundConcurrency: 4,
+  fullResyncIntervalMs: 24 * 60 * 60_000,
 };
 
 /** Tolerated clock difference between us and the platform when matching own replies by time. */
@@ -122,8 +128,14 @@ export class CommentSyncService {
       const provider = providers.get(publication.platform);
       const creds = await credentials.getForAccount(account);
 
-      const mode: SyncMode = opts.mode ?? (provider.capabilities.incrementalSync ? 'incremental' : 'full');
-      const explicitFull = opts.mode === 'full';
+      // Incremental runs only ever see new comments; a full walk is due periodically so likes and
+      // edits of older ones are refreshed too. An explicit or due full walk starts from scratch;
+      // an interrupted one resumes through its continuation like any other walk.
+      const fullDue =
+        state.continuation === null &&
+        now.getTime() - (state.lastFullSyncAt?.getTime() ?? 0) >= this.fullResyncIntervalFor(publication, now);
+      const mode: SyncMode = opts.mode ?? (provider.capabilities.incrementalSync && !fullDue ? 'incremental' : 'full');
+      const explicitFull = opts.mode === 'full' || (opts.mode === undefined && fullDue);
       // The committed cursor bounds the query. A walk that hit the budget last time resumes from
       // its continuation (same query, saved page token) and keeps its cursor candidate.
       const continuation = explicitFull ? null : state.continuation;
@@ -187,6 +199,8 @@ export class CommentSyncService {
         cursor: complete ? candidateCursor : state.cursor,
         continuation: complete || pageToken === null ? null : { pageToken, sinceCursor, candidateCursor },
         lastSyncedAt: finishedAt,
+        // A complete walk that was not bounded by a cursor saw everything the platform has.
+        ...(complete && sinceCursor === null ? { lastFullSyncAt: finishedAt } : {}),
         // Incomplete walks are rescheduled immediately; complete ones follow the age-based schedule.
         nextSyncAt: complete
           ? new Date(finishedAt.getTime() + nextPollDelayMs(publication.publishedAt, finishedAt))
@@ -223,6 +237,19 @@ export class CommentSyncService {
       });
       throw err;
     }
+  }
+
+  /**
+   * A reply whose outcome is unknown must not wait for the regular schedule (up to a day for
+   * old posts): pull the publication's next run forward to the reconciliation window.
+   */
+  async scheduleReconciliation(publicationId: string): Promise<void> {
+    const at = new Date(this.deps.clock.now().getTime() + this.options.reconcileAfterMs);
+    await this.deps.repos.syncStates.scheduleNoLaterThan(publicationId, at);
+  }
+
+  private fullResyncIntervalFor(publication: PostPublication, now: Date): number {
+    return Math.max(this.options.fullResyncIntervalMs, 4 * nextPollDelayMs(publication.publishedAt, now));
   }
 
   /**

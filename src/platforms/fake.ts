@@ -89,6 +89,13 @@ export class FakeCommentProvider implements CommentProvider {
     return [...(this.store.get(externalPostId) ?? [])];
   }
 
+  /** Simulates an edit or a metric change on the platform (seq unchanged, so incremental sync will not see it). */
+  patch(externalPostId: string, externalId: string, changes: Partial<Pick<ExternalComment, 'body' | 'metrics'>>): void {
+    const comment = this.all(externalPostId).find((c) => c.externalId === externalId);
+    if (!comment) throw new Error(`no comment ${externalId}`);
+    Object.assign(comment, changes);
+  }
+
   /**
    * Make the next call fail. With `afterApply`, createReply first stores the reply "on the
    * platform" and then throws, simulating a request that was applied but whose response was lost.

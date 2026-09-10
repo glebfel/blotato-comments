@@ -200,6 +200,10 @@ describe('CommentService.reply', () => {
     });
     const pending = (await h.repos.comments.findByIdempotencyKey(IDS.workspace, 'k1'))!;
     expect(pending).toMatchObject({ status: 'pending', error: { code: 'platform_unavailable' } });
+    // The publication is pulled forward to the reconciliation window instead of waiting for its schedule.
+    expect((await h.repos.syncStates.get(IDS.twitterPublication))?.nextSyncAt).toEqual(
+      new Date(h.clock.now().getTime() + 60_000),
+    );
 
     // Same key -> no second post, the client is told to wait for reconciliation.
     await expect(

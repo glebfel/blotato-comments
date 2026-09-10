@@ -343,6 +343,12 @@ export class InMemorySyncStateRepository implements SyncStateRepository {
     if (!this.rows.has(publicationId)) this.rows.set(publicationId, this.blank(publicationId, nextSyncAt));
   }
 
+  async scheduleNoLaterThan(publicationId: string, at: Date): Promise<void> {
+    const s = this.rows.get(publicationId) ?? this.blank(publicationId, at);
+    const current = s.nextSyncAt?.getTime() ?? Infinity;
+    this.rows.set(publicationId, { ...s, nextSyncAt: current <= at.getTime() ? s.nextSyncAt : at });
+  }
+
   async tryAcquire(publicationId: string, now: Date, leaseMs: number): Promise<SyncLease | null> {
     const existing = this.rows.get(publicationId) ?? this.blank(publicationId, now);
     if (this.leaseLive(existing, now)) return null;
@@ -373,6 +379,7 @@ export class InMemorySyncStateRepository implements SyncStateRepository {
       cursor: patch.cursor,
       continuation: patch.continuation,
       lastSyncedAt: patch.lastSyncedAt,
+      lastFullSyncAt: patch.lastFullSyncAt ?? s.lastFullSyncAt,
       nextSyncAt: patch.nextSyncAt,
       lockToken: null,
       lockExpiresAt: null,
@@ -421,6 +428,7 @@ export class InMemorySyncStateRepository implements SyncStateRepository {
       cursor: null,
       continuation: null,
       lastSyncedAt: null,
+      lastFullSyncAt: null,
       nextSyncAt,
       lockToken: null,
       lockExpiresAt: null,

@@ -167,6 +167,8 @@ export interface CommentSyncState {
   /** In-progress walk that hit the request budget; null when idle. */
   continuation: SyncContinuation | null;
   lastSyncedAt: Date | null;
+  /** Last completed full walk (see CommentSyncService: incremental runs never refresh old comments). */
+  lastFullSyncAt: Date | null;
   nextSyncAt: Date | null;
   /** Fencing token of the worker that currently holds the lease. */
   lockToken: string | null;

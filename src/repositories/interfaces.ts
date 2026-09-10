@@ -119,6 +119,8 @@ export interface SyncFinishPatch {
   cursor: string | null;
   continuation: SyncContinuation | null;
   lastSyncedAt: Date;
+  /** Set when this run completed a full walk. */
+  lastFullSyncAt?: Date;
   nextSyncAt: Date;
 }
 
@@ -139,6 +141,8 @@ export interface SyncStateRepository {
   listByPublications(publicationIds: string[]): Promise<CommentSyncState[]>;
   /** Creates the row if missing (scheduling the first sync) without touching an existing one. */
   ensure(publicationId: string, nextSyncAt: Date): Promise<void>;
+  /** Pulls the next run forward to `at` if it is currently scheduled later (or not at all). */
+  scheduleNoLaterThan(publicationId: string, at: Date): Promise<void>;
   /**
    * Lease-based lock. Returns the lease when this caller now owns the sync, or null when another
    * worker holds an unexpired lease. Single statement, so two racing workers cannot both win.

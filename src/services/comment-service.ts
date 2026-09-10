@@ -338,6 +338,7 @@ export class CommentService {
         updatedAt: clock.now(),
       };
       await repos.comments.update(recorded);
+      if (outcomeUnknown) await this.deps.sync.scheduleReconciliation(publication.id);
       if (platformErr?.kind === 'not_found') {
         // The platform says the target is gone; reflect that instead of letting the next reply fail too.
         await repos.comments.update({ ...parent, status: 'deleted', updatedAt: clock.now() });

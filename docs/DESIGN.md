@@ -365,10 +365,15 @@ LOCKED` over `comment_sync_states`, or BullMQ). The fenced lease already makes t
 8. **More adapters** (section 8) and the write side of moderation: hide, delete, like.
 9. **Observability.** Sync duration, requests per run, failures by `kind` and platform,
    reply latency, reconciliation outcomes. Structured logs exist; metrics do not.
-10. **Late-arriving parents.** If a parent arrives after its child was treated as a root,
+10. **Multi-instance rate limiting.** `@fastify/rate-limit` keeps counters in process memory,
+    so N instances multiply every limit by N; production uses its Redis store.
+11. **Idempotency-Key retention.** Keys are unique per workspace forever. A client that
+    recycles keys after months would get `422`; production expires them (Stripe: 24 h) with a
+    periodic delete of `idempotency_key` on old published rows.
+12. **Late-arriving parents.** If a parent arrives after its child was treated as a root,
     the child is re-linked but grandchildren keep the old path until a full walk. Rare, and
     fixable by re-resolving descendants of re-linked rows (`UPDATE ... WHERE thread_path LIKE old || '/%'`).
-11. **Re-publication.** If the scheduler retries a publication whose outcome was unknown, the
+13. **Re-publication.** If the scheduler retries a publication whose outcome was unknown, the
     same post can end up with two publication rows on one account. The API already aggregates
     by post, so both threads show; a `superseded` status on publications would let the UI
     hide the dead one.
