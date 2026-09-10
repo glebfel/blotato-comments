@@ -4,7 +4,7 @@ import type { HttpRequest, HttpResponse } from '../src/platforms/http.js';
 import { TwitterCommentProvider } from '../src/platforms/twitter.js';
 import { YouTubeCommentProvider } from '../src/platforms/youtube.js';
 
-const creds = { accessToken: 'tok' };
+const creds = { accessToken: 'tok', apiKey: null };
 const fetchInput = (externalPostId: string, syncCursor: string | null = null, requestBudget = 20) => ({
   credentials: creds,
   externalPostId,
@@ -237,6 +237,25 @@ describe('YouTubeCommentProvider', () => {
     expect(capped.requestsUsed).toBe(1);
   });
 
+  it('reads with a plain API key when no OAuth token is present, but refuses to reply with it', async () => {
+    const { http, calls } = stub(() => ok({ items: [] }));
+    const provider = new YouTubeCommentProvider(http, 'https://yt.test/v3');
+    await provider.fetchComments({ ...fetchInput('vid'), credentials: { accessToken: null, apiKey: 'k123' } });
+    expect(new URL(calls[0]!.url).searchParams.get('key')).toBe('k123');
+    expect(calls[0]!.headers?.authorization).toBeUndefined();
+
+    await expect(
+      provider.createReply({
+        credentials: { accessToken: null, apiKey: 'k123' },
+        externalPostId: 'vid',
+        parentExternalId: 'c',
+        rootExternalId: 'c',
+        text: 'hey',
+      }),
+    ).rejects.toMatchObject({ kind: 'auth' });
+    expect(calls).toHaveLength(1);
+  });
+
   it('replies to the thread root because the platform is single-level', async () => {
     const { http, calls } = stub(() =>
       ok({ id: 'new', snippet: { parentId: 'root', publishedAt: '2026-01-02T00:00:00Z' } }),
@@ -275,5 +294,37 @@ describe('YouTubeCommentProvider', () => {
       kind: 'auth',
     });
     await expect(at('somethingNew').fetchComments(fetchInput('vid'))).rejects.toMatchObject({ kind: 'auth' }); // generic 403 fallback
+
+    // Recorded from a live call with an invalid key: the legacy reason is a generic badRequest,
+    // the real reason sits in the google.rpc.ErrorInfo detail.
+    const invalidKey = new YouTubeCommentProvider(
+      stub(() =>
+        ok(
+          {
+            error: {
+              code: 400,
+              message: 'API key not valid. Please pass a valid API key.',
+              errors: [{ message: 'API key not valid.', domain: 'global', reason: 'badRequest' }],
+              status: 'INVALID_ARGUMENT',
+              details: [
+                {
+                  '@type': 'type.googleapis.com/google.rpc.ErrorInfo',
+                  reason: 'API_KEY_INVALID',
+                  domain: 'googleapis.com',
+                },
+                {
+                  '@type': 'type.googleapis.com/google.rpc.LocalizedMessage',
+                  locale: 'en-US',
+                  message: 'API key not valid.',
+                },
+              ],
+            },
+          },
+          400,
+        ),
+      ).http,
+      'https://yt.test/v3',
+    );
+    await expect(invalidKey.fetchComments(fetchInput('vid'))).rejects.toMatchObject({ kind: 'auth', retryable: false });
   });
 });

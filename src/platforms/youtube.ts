@@ -1,4 +1,4 @@
-import type { PlatformErrorKind } from '../domain/errors.js';
+import { PlatformError, type PlatformErrorKind } from '../domain/errors.js';
 import type { Platform } from '../domain/types.js';
 import { fetchHttpClient, send, throwForStatus, type HttpClient, type HttpResponse } from './http.js';
 import type {
@@ -27,8 +27,11 @@ import type {
  *   - Quota matters (list = 1 unit, insert = 50 units, 10k units/day by default): one reason
  *     polling frequency decays with post age (see docs/DESIGN.md). Quota errors come back as
  *     403 with a `reason`, which the classifier turns into `rate_limited`, not `auth`.
+ *   - Public comments can be read with a plain API key (`key=`); replying needs the channel
+ *     owner's OAuth token. The adapter uses whichever the credentials carry.
  *
- * Built from the public API reference; not executed against the live API in this repo.
+ * Reading is covered by a live test against the real API (test/youtube.live.test.ts, needs
+ * YOUTUBE_API_KEY); replying is tested against recorded response shapes only.
  */
 
 interface CommentSnippet {
@@ -59,10 +62,24 @@ interface ListResponse<T> {
 }
 
 interface GoogleErrorBody {
-  error?: { errors?: Array<{ reason?: string; domain?: string }> };
+  error?: {
+    errors?: Array<{ reason?: string; domain?: string }>;
+    /** Newer Google error format: google.rpc.ErrorInfo entries carry the specific reason. */
+    details?: Array<{ '@type'?: string; reason?: string }>;
+  };
 }
 
+// Legacy `errors[].reason` values and google.rpc.ErrorInfo `details[].reason` values, observed live:
+// an invalid key answers 400 with errors[].reason = badRequest and details[].reason = API_KEY_INVALID.
 const REASON_KIND: Record<string, PlatformErrorKind> = {
+  keyInvalid: 'auth',
+  API_KEY_INVALID: 'auth',
+  API_KEY_SERVICE_BLOCKED: 'auth',
+  SERVICE_DISABLED: 'auth',
+  ACCESS_TOKEN_EXPIRED: 'auth',
+  ACCESS_TOKEN_SCOPE_INSUFFICIENT: 'auth',
+  RATE_LIMIT_EXCEEDED: 'rate_limited',
+  QUOTA_EXCEEDED: 'rate_limited',
   quotaExceeded: 'rate_limited',
   dailyLimitExceeded: 'rate_limited',
   rateLimitExceeded: 'rate_limited',
@@ -132,6 +149,11 @@ export class YouTubeCommentProvider implements CommentProvider {
   }
 
   async createReply(input: CreateReplyInput): Promise<CreateReplyResult> {
+    if (!input.credentials.accessToken) {
+      throw new PlatformError(this.platform, 'auth', 'replying on youtube requires the channel owner OAuth token', {
+        retryable: false,
+      });
+    }
     // YouTube only accepts replies to top-level comments.
     const parentId = input.rootExternalId;
     const res = await send(this.platform, this.http, {
@@ -175,11 +197,15 @@ export class YouTubeCommentProvider implements CommentProvider {
     return { items, requestsUsed };
   }
 
+  /** Reads go through the OAuth token when we have one (private/unlisted videos), else the API key. */
   private async get(url: string, input: FetchCommentsInput, context: string): Promise<HttpResponse> {
+    const { accessToken, apiKey } = input.credentials;
+    const target = new URL(url);
+    if (!accessToken && apiKey) target.searchParams.set('key', apiKey);
     const res = await send(this.platform, this.http, {
       method: 'GET',
-      url,
-      headers: { authorization: `Bearer ${input.credentials.accessToken}` },
+      url: target.toString(),
+      headers: accessToken ? { authorization: `Bearer ${accessToken}` } : {},
     });
     if (res.status !== 200) throwForStatus(this.platform, res, context, classify);
     return res;
@@ -187,8 +213,16 @@ export class YouTubeCommentProvider implements CommentProvider {
 }
 
 function classify(res: HttpResponse): PlatformErrorKind | null {
-  const reason = (res.json as GoogleErrorBody | null)?.error?.errors?.[0]?.reason;
-  return reason ? (REASON_KIND[reason] ?? null) : null;
+  const error = (res.json as GoogleErrorBody | null)?.error;
+  const reasons = [
+    ...(error?.errors ?? []).map((e) => e.reason),
+    ...(error?.details ?? []).filter((d) => d['@type']?.endsWith('ErrorInfo')).map((d) => d.reason),
+  ];
+  for (const reason of reasons) {
+    const kind = reason ? REASON_KIND[reason] : undefined;
+    if (kind) return kind;
+  }
+  return null;
 }
 
 function commentUrl(videoId: string, commentId: string): string {

@@ -30,7 +30,7 @@ export interface AppConfig {
   poller: { enabled: boolean; intervalMs: number; batchSize: number; concurrency: number };
   sync: SyncOptions & { staleAfterMs: number; staleMaxMs: number };
   rateLimits: RateLimitConfig;
-  tokens: { twitter?: string; youtube?: string };
+  tokens: { twitter?: string; youtube?: string; youtubeApiKey?: string };
   /** apiKey -> workspaceId */
   apiKeys: Record<string, string>;
 }
@@ -69,6 +69,7 @@ const EnvSchema = z.object({
   RATE_LIMIT_REPLY_PER_MINUTE: intFromEnv(DEFAULT_RATE_LIMITS.replyPerMinute),
   TWITTER_ACCESS_TOKEN: z.string().optional(),
   YOUTUBE_ACCESS_TOKEN: z.string().optional(),
+  YOUTUBE_API_KEY: z.string().optional(),
   API_KEYS: z.string().optional(),
 });
 
@@ -116,7 +117,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       syncPerMinute: e.RATE_LIMIT_SYNC_PER_MINUTE,
       replyPerMinute: e.RATE_LIMIT_REPLY_PER_MINUTE,
     },
-    tokens: { twitter: e.TWITTER_ACCESS_TOKEN, youtube: e.YOUTUBE_ACCESS_TOKEN },
+    tokens: { twitter: e.TWITTER_ACCESS_TOKEN, youtube: e.YOUTUBE_ACCESS_TOKEN, youtubeApiKey: e.YOUTUBE_API_KEY },
     apiKeys: demoMode ? { [DEMO.apiKey]: DEMO.workspaceId } : parseApiKeys(e.API_KEYS),
   };
 }
@@ -154,7 +155,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
 
   const providers = new ProviderRegistry();
   const credentials = new StaticCredentialsProvider(
-    { twitter: config.tokens.twitter, youtube: config.tokens.youtube },
+    {
+      twitter: { accessToken: config.tokens.twitter },
+      youtube: { accessToken: config.tokens.youtube, apiKey: config.tokens.youtubeApiKey },
+    },
     // Only demo mode gets a stand-in token; a misconfigured production process must fail loudly.
     config.demoMode ? 'demo-token' : null,
   );

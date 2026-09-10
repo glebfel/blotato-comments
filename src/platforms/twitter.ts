@@ -1,4 +1,4 @@
-import type { PlatformErrorKind } from '../domain/errors.js';
+import { PlatformError, type PlatformErrorKind } from '../domain/errors.js';
 import type { Platform } from '../domain/types.js';
 import { extractMessage, fetchHttpClient, send, throwForStatus, type HttpClient, type HttpResponse } from './http.js';
 import type {
@@ -72,6 +72,7 @@ export class TwitterCommentProvider implements CommentProvider {
   ) {}
 
   async fetchComments(input: FetchCommentsInput): Promise<FetchCommentsResult> {
+    const token = requireToken(input.credentials.accessToken);
     const params = new URLSearchParams({
       query: `conversation_id:${input.externalPostId}`,
       'tweet.fields': 'author_id,created_at,conversation_id,referenced_tweets,public_metrics',
@@ -85,7 +86,7 @@ export class TwitterCommentProvider implements CommentProvider {
     const res = await send(this.platform, this.http, {
       method: 'GET',
       url: `${this.baseUrl}/tweets/search/recent?${params.toString()}`,
-      headers: { authorization: `Bearer ${input.credentials.accessToken}` },
+      headers: { authorization: `Bearer ${token}` },
     });
     if (res.status !== 200) throwForStatus(this.platform, res, 'search', classify);
 
@@ -124,10 +125,11 @@ export class TwitterCommentProvider implements CommentProvider {
   }
 
   async createReply(input: CreateReplyInput): Promise<CreateReplyResult> {
+    const token = requireToken(input.credentials.accessToken);
     const res = await send(this.platform, this.http, {
       method: 'POST',
       url: `${this.baseUrl}/tweets`,
-      headers: { authorization: `Bearer ${input.credentials.accessToken}` },
+      headers: { authorization: `Bearer ${token}` },
       body: { text: input.text, reply: { in_reply_to_tweet_id: input.parentExternalId } },
     });
     if (res.status !== 201 && res.status !== 200) throwForStatus(this.platform, res, 'create reply', classify);
@@ -149,6 +151,13 @@ export class TwitterCommentProvider implements CommentProvider {
 /** X resolves /i/web/status/{id} to the right handle, so a link works even before we know the author. */
 function tweetUrl(handle: string | undefined, id: string): string {
   return handle ? `https://x.com/${handle}/status/${id}` : `https://x.com/i/web/status/${id}`;
+}
+
+/** X has no read-only API-key mode; every call is made as the connected account. */
+function requireToken(token: string | null): string {
+  if (!token)
+    throw new PlatformError('twitter', 'auth', 'twitter requires an OAuth access token', { retryable: false });
+  return token;
 }
 
 function classify(res: HttpResponse): PlatformErrorKind | null {

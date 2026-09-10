@@ -69,6 +69,12 @@ npm run check                              # typecheck + eslint/prettier + tests
 npm run build
 ```
 
+Against the real YouTube API (reads public comments with a plain Google API key, ~5 quota units):
+
+```bash
+YOUTUBE_API_KEY=... npm test          # runs test/youtube.live.test.ts as well
+```
+
 Against a real database with real platforms: `STORAGE=postgres DATABASE_URL=... DEMO_MODE=false
 API_KEYS=key:workspaceId TWITTER_ACCESS_TOKEN=... npm start` (after `npm run build`). The
 X and YouTube adapters are written from the public API references and unit-tested against
@@ -136,4 +142,5 @@ This submission was built with Claude Code (Anthropic's CLI agent) doing most of
 - Verification was done outside the model after every round: typecheck, ESLint, the test
   suite including the Postgres integration tests in Docker, and a curl smoke test of the demo
   server. The X and YouTube adapters were written from the public API references and tested
-  against recorded response shapes; they have not been run against the live APIs.
+  against recorded response shapes; YouTube reading was then verified against the live API
+  with an API key, X and the reply paths were not.

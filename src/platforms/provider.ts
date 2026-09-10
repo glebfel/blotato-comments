@@ -24,8 +24,13 @@ export interface PlatformCapabilities {
   incrementalSync: boolean;
 }
 
+/**
+ * What an adapter may authenticate with. An OAuth access token acts as the account (needed to
+ * reply); an API key only reads public data (YouTube Data API supports it for comment listing).
+ */
 export interface AccountCredentials {
-  accessToken: string;
+  accessToken: string | null;
+  apiKey: string | null;
 }
 
 export interface FetchCommentsInput {

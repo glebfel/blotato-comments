@@ -15,25 +15,34 @@ export interface CredentialsProvider {
   getForAccount(account: SocialAccount): Promise<AccountCredentials>;
 }
 
+export interface PlatformSecrets {
+  accessToken?: string;
+  apiKey?: string;
+}
+
 export class StaticCredentialsProvider implements CredentialsProvider {
   /**
-   * @param tokens   access token per platform (env-provided stand-in for per-account storage)
+   * @param secrets  per-platform token / API key (env-provided stand-in for per-account storage)
    * @param fallback token used when a platform has none; only demo mode sets this, so a
    *                 misconfigured production process fails loudly instead of calling X with "demo-token"
    */
   constructor(
-    private readonly tokens: Partial<Record<Platform, string>> = {},
+    private readonly secrets: Partial<Record<Platform, PlatformSecrets>> = {},
     private readonly fallback: string | null = null,
   ) {}
 
   async getForAccount(account: SocialAccount): Promise<AccountCredentials> {
-    const accessToken = this.tokens[account.platform] ?? this.fallback;
-    if (!accessToken) {
+    const configured = this.secrets[account.platform] ?? {};
+    const credentials: AccountCredentials = {
+      accessToken: configured.accessToken ?? this.fallback,
+      apiKey: configured.apiKey ?? null,
+    };
+    if (!credentials.accessToken && !credentials.apiKey) {
       throw new DomainError('account_not_connected', `No credentials configured for ${account.platform}`, {
         socialAccountId: account.id,
         platform: account.platform,
       });
     }
-    return { accessToken };
+    return credentials;
   }
 }
