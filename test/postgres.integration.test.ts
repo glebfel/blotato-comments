@@ -285,10 +285,11 @@ describeDb('Postgres repositories', () => {
     expect(await sync.syncPublication(ids.publication, { lease: claimed[0] })).toMatchObject({ status: 'ok' });
 
     // scheduleNoLaterThan only ever moves the run earlier.
-    const soon = new Date(clock.now().getTime() + 1_000);
-    await repos.syncStates.scheduleNoLaterThan(ids.publication, soon);
-    expect((await repos.syncStates.get(ids.publication))?.nextSyncAt).toEqual(soon);
-    await repos.syncStates.scheduleNoLaterThan(ids.publication, new Date(soon.getTime() + 60_000));
-    expect((await repos.syncStates.get(ids.publication))?.nextSyncAt).toEqual(soon);
+    const scheduled = (await repos.syncStates.get(ids.publication))!.nextSyncAt!;
+    const earlier = new Date(scheduled.getTime() - 1_000);
+    await repos.syncStates.scheduleNoLaterThan(ids.publication, earlier);
+    expect((await repos.syncStates.get(ids.publication))?.nextSyncAt).toEqual(earlier);
+    await repos.syncStates.scheduleNoLaterThan(ids.publication, new Date(scheduled.getTime() + 60_000));
+    expect((await repos.syncStates.get(ids.publication))?.nextSyncAt).toEqual(earlier);
   });
 });
